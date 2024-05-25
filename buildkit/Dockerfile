@@ -4,28 +4,28 @@
 # PLEASE DO NOT EDIT IT DIRECTLY.
 #
 
-# syntax=docker/dockerfile:1.5
-
 FROM --platform=$BUILDPLATFORM golang:1.21 AS build
 
+# https://github.com/moby/buildkit/releases
+ENV BUILDKIT_VERSION 0.13.2
+
+COPY \
+	containerd-arm64-v8.patch \
+	mips64le.patch \
+	noclip.patch \
+	/tmp/buildkit-patches/
+
+WORKDIR /app
+
 RUN set -eux; \
-	apt-get update; \
-	apt-get install -y --no-install-recommends \
-		patch \
-	; \
-	rm -rf /var/lib/apt/lists/*
+	git clone --branch "v$BUILDKIT_VERSION" --depth 1 --config advice.detachedHead=false 'https://github.com/moby/buildkit.git' .; \
+	git apply /tmp/buildkit-patches/*.patch; \
+	git diff --color
 
 ENV CGO_ENABLED 0
 
 ARG TARGETOS TARGETARCH TARGETVARIANT
 ENV GOOS=$TARGETOS GOARCH=$TARGETARCH VARIANT=$TARGETVARIANT
-
-# https://github.com/moby/buildkit/releases
-ENV BUILDKIT_VERSION 0.13.2
-
-# pkg/mod/github.com/moby/buildkit@v0.12.0/snapshot/diffapply_unix.go:131:8: cannot use stat.Dev (variable of type uint32) as uint64 value in struct literal
-# pkg/mod/github.com/moby/buildkit@v0.12.0/snapshot/diffapply_unix.go:300:12: cannot use unix.Mkdev(0, 0) (value of type uint64) as uint32 value in struct literal
-COPY mips64le.patch /tmp/
 
 RUN set -eux; \
 	case "$GOARCH" in \
@@ -34,9 +34,6 @@ RUN set -eux; \
 		*) [ -z "$VARIANT" ] ;; \
 	esac; \
 	go env | grep -E 'OS=|ARCH=|ARM=|AMD64='; \
-	git clone -b "v$BUILDKIT_VERSION" --depth 1 'https://github.com/moby/buildkit.git' /app; \
-	cd /app; \
-	patch -p1 --input=/tmp/mips64le.patch; \
 # TODO https://github.com/moby/buildkit/blob/v0.12.2/Dockerfile#L79
 	go build -o /buildkitd -trimpath -ldflags '-d -w' ./cmd/buildkitd; \
 	go build -o /buildctl -trimpath -ldflags '-d -w' ./cmd/buildctl
